@@ -1,15 +1,16 @@
 # Deep Q-Network Algorithm
 
 # Import modules
+import cv2
 import tensorflow as tf
-import sys
+import os.path
 import random
 import numpy as np
-import os
 import time, datetime
 from collections import deque
-import cv2
 import pickle
+import sys
+import os
 
 import pygame
 import matplotlib.pyplot as plt
@@ -20,21 +21,20 @@ ops.reset_default_graph()
 
 # Import game
 sys.path.append("DQN_GAMES/")
-
 import pong as game
 
-action_size = game.Return_Num_Action()
 
-file_name =  sys.argv[0][:-3]
+game_name =  sys.argv[0][:-3]
+action_size = game.Return_Num_Action()               # number of valid actions
 
-model_path = "save_model/" + game.ReturnName() + "/" + file_name
-graph_path = "save_graph/" + game.ReturnName() + "/" + file_name
+model_path = "save_model/" + game.ReturnName() + "/" + game_name
+graph_path = "save_graph/" + game.ReturnName() + "/" + game_name
 
-if not os.path.isdir(model_path):
-    os.mkdir(model_path)
-
-if not os.path.isdir(graph_path):
-    os.mkdir(graph_path)
+# Make folder for save data
+if not os.path.exists(model_path):
+    os.makedirs(model_path)
+if not os.path.exists(graph_path):
+    os.makedirs(graph_path)
 
 class DQN_agent:
     def __init__(self):
@@ -70,7 +70,7 @@ class DQN_agent:
         self.Num_stacking = 4
 
         # Parameter for Experience Replay
-        self.size_replay_memory = 5000
+        self.size_replay_memory = 50000
         self.batch_size = 64
         
         # Experience Replay 
@@ -78,7 +78,7 @@ class DQN_agent:
         
         # Parameter for Target Network
         self.target_update_cycle = 200
-
+        
         # Parameters for network
         self.img_rows , self.img_cols = 80, 80
         self.Num_colorChannel = 1
@@ -199,32 +199,6 @@ class DQN_agent:
 
         return train_step, action_tgt, y_tgt, Loss
 
-    # get action from model using epsilon-greedy policy
-    def get_action(self, stacked_state):
-        # choose an action epsilon greedily
-        action = np.zeros([self.action_size])
-        action_index = 0
-        
-        if random.random() < self.epsilon:
-            # print("----------Random Action----------")
-            action_index = random.randint(0, self.action_size-1)
-            action[action_index] = 1
-        else:
-            # Choose greedy action
-            Q_value = self.output.eval(feed_dict= {self.input:[stacked_state]})[0]
-            action_index = np.argmax(Q_value)
-            action[action_index] = 1
-            
-        return action, action_index
-
-    # save sample <s,a,r,s'> to the replay memory
-    def append_sample(self, state, action, reward, next_state, done):
-        #in every action put in the memory
-        self.memory.append([state, action, reward, next_state, done])
-        
-        while len(self.memory) > self.size_replay_memory:
-            self.memory.popleft()
-            
     # pick samples randomly from replay memory (with batch_size)
     def train_model(self):
         # sample a minibatch to train on
@@ -259,6 +233,31 @@ class DQN_agent:
         else :
             self.epsilon = self.epsilon_min
 
+    # get action from model using epsilon-greedy policy
+    def get_action(self, stacked_state):
+        # choose an action epsilon greedily
+        action = np.zeros([self.action_size])
+        action_index = 0
+        
+        if random.random() < self.epsilon:
+            # print("----------Random Action----------")
+            action_index = random.randint(0, self.action_size-1)
+            action[action_index] = 1
+        else:
+            Q_value = self.output.eval(feed_dict= {self.input:[stacked_state]})[0]
+            action_index = np.argmax(Q_value)
+            action[action_index] = 1
+            
+        return action, action_index
+
+    # save sample <s,a,r,s'> to the replay memory
+    def append_sample(self, state, action, reward, next_state, done):
+        #in every action put in the memory
+        self.memory.append([state, action, reward, next_state, done])
+        
+        while len(self.memory) > self.size_replay_memory:
+            self.memory.popleft()
+            
     # after some time interval update the target model to be same with model
     def Copy_Weights(self):
         # Get trainable variables
@@ -277,15 +276,11 @@ class DQN_agent:
     def save_model(self):
         # Save the variables to disk.
         save_path = self.saver.save(self.sess, model_path + "/model.ckpt")
-
-        with open(model_path + '/append_sample.pickle', 'wb') as f:
-            pickle.dump(self.memory, f)
-
         save_object = (self.epsilon, self.episode, self.step)
         with open(model_path + '/epsilon.pickle', 'wb') as ggg:
             pickle.dump(save_object, ggg)
 
-        print("\n Model saved in file: %s" % save_path)
+        print("\n Model saved in file: %s" % model_path)
 
 def main():
     
@@ -300,9 +295,7 @@ def main():
 
     if ckpt and tf.train.checkpoint_exists(ckpt.model_checkpoint_path):
         agent.saver.restore(agent.sess, ckpt.model_checkpoint_path)
-        if os.path.isfile(model_path + '/append_sample.pickle'):  
-            with open(model_path + '/append_sample.pickle', 'rb') as f:
-                agent.memory = pickle.load(f)
+        if os.path.isfile(model_path + '/epsilon.pickle'):
             with open(model_path + '/epsilon.pickle', 'rb') as ggg:
                 agent.epsilon, agent.episode, agent.step = pickle.load(ggg)
             
@@ -319,9 +312,10 @@ def main():
     # start training    
     # Step 3.2: run the game
     display_time = datetime.datetime.now()
-    print("\n\n",file_name, "-game start at :",display_time,"\n")
+    print("\n\n",game_name, "-game start at :",display_time,"\n")
     start_time = time.time()
     
+    # Initialize target network.
     agent.Copy_Weights()
     
     while time.time() - start_time < agent.training_time:
@@ -335,9 +329,10 @@ def main():
         stacked_state = agent.skip_and_stack_frame(state)
 
         while not done and ep_step < agent.ep_trial_step:
+            
             if len(agent.memory) < agent.size_replay_memory:
-                agent.progress = "Exploration"
-            else :
+                agent.progress = "Exploration"            
+            else:
                 agent.progress = "Training"
 
             ep_step += 1
@@ -376,10 +371,10 @@ def main():
                 break
     # Save model
     agent.save_model()
-    
+
     e = int(time.time() - start_time)
     print(' Elasped time :{:02d}:{:02d}:{:02d}'.format(e // 3600, (e % 3600 // 60), e % 60))
     sys.exit()
-                    
+
 if __name__ == "__main__":
     main()
